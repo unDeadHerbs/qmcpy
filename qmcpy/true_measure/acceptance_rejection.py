@@ -1,4 +1,4 @@
-from typing import Callable, List, Union
+from typing import Callable, List, Union, Optional
 from .abstract_true_measure import AbstractTrueMeasure
 from ..discrete_distribution.abstract_discrete_distribution import (
     AbstractDiscreteDistribution,
@@ -76,7 +76,7 @@ class AcceptanceRejection(AbstractTrueMeasure):
         qmcpy.util.exceptions_warnings.ParameterError: n_min > 0 but no prior call was made. Call gen_samples with n_min=0 first.
     """
 
-    def __init__(self, sampler: AbstractDiscreteDistribution, target_density: Callable, upper_bound: float, density_integral: float, max_retries: int = 4) -> None:
+    def __init__(self, sampler: AbstractDiscreteDistribution, target_density: Callable, upper_bound: Optional[float] = None, density_integral: Optional[float] = None, max_retries: int = 4) -> None:
         r"""Initialize an AcceptanceRejection true measure.
 
         Args:
@@ -88,9 +88,10 @@ class AcceptanceRejection(AbstractTrueMeasure):
                 $\psi(x)$ where x has shape (N, d). Must return shape (N,)
                 and be non-negative on $[0,1]^d$.
             upper_bound (float): $L = \sup_{x \in [0,1]^d} \psi(x)$. Every
-                evaluation of $\psi$ must be $\le L$.
+                evaluation of $\psi$ must be $\le L$.  Defaults to symbolic
+                detection.
             density_integral (float): $C = \int_{[0,1]^d} \psi(x) \, dx$.
-                The acceptance rate is $C/L$.
+                The acceptance rate is $C/L$.  Defaults to symbolic detection.
             max_retries (int): Number of times gen_samples will double the
                 driver size if not enough points are accepted. Default 4.
         """
@@ -104,8 +105,14 @@ class AcceptanceRejection(AbstractTrueMeasure):
             )
         self.target_dim = self.d - 1
         self.target_density = target_density
-        self.upper_bound = float(upper_bound)
-        self.density_integral = float(density_integral)
+        if upper_bound is None:
+            raise NotImplementedError("upper_bound = None")
+        else:
+            self.upper_bound = float(upper_bound)
+        if density_integral is None:
+            raise NotImplementedError("density_integral = None")
+        else:
+            self.density_integral = float(density_integral)
         if self.upper_bound <= 0:
             raise ParameterError("upper_bound must be strictly positive.")
         if self.density_integral <= 0:
@@ -302,7 +309,7 @@ class AcceptanceRejectionReal(AbstractTrueMeasure):
     """
 
     def __init__(self, sampler: AbstractDiscreteDistribution, target_density: Callable, inv_cdfs: List[Callable], H_func: Callable,
-                 upper_bound: float, density_integral: float, max_retries: int = 4) -> None:
+                 upper_bound: Optional[float] = None, density_integral: Optional[float] = None, max_retries: int = 4) -> None:
         r"""Initialize an AcceptanceRejectionReal true measure.
 
         Args:
@@ -319,8 +326,9 @@ class AcceptanceRejectionReal(AbstractTrueMeasure):
                 shape (N, d). Must return shape (N,) and satisfy
                 $\psi(z) \le L \, H(z)$ for all $z \in \mathbb{R}^d$.
             upper_bound (float): L satisfying $\psi(z) \le L \, H(z)$ for all z.
+                Defaults to symbolic detection
             density_integral (float): $C = \int_{\mathbb{R}^d} \psi(z) \, dz$.
-                The acceptance rate is $C/L$.
+                The acceptance rate is $C/L$.  Defaults to symbolic detection.
             max_retries (int): Number of times gen_samples will double the
                 driver size if not enough points are accepted. Default 4.
         """
@@ -341,8 +349,14 @@ class AcceptanceRejectionReal(AbstractTrueMeasure):
         self.target_density = target_density
         self.inv_cdfs = inv_cdfs
         self.H_func = H_func
-        self.upper_bound = float(upper_bound)
-        self.density_integral = float(density_integral)
+        if upper_bound is None:
+            raise NotImplementedError("upper_bound = None")
+        else:
+            self.upper_bound = float(upper_bound)
+        if density_integral is None:
+            raise NotImplementedError("density_integral = None")
+        else:
+            self.density_integral = float(density_integral)
         if self.upper_bound <= 0:
             raise ParameterError("upper_bound must be strictly positive.")
         if self.density_integral <= 0:
