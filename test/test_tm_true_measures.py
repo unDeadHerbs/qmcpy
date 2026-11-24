@@ -2776,6 +2776,29 @@ class TestAcceptanceRejection(unittest.TestCase):
                 self.psi, upper_bound=2., density_integral=1.
             )
 
+    def test_auto_constants(self):
+        """An integration test for automatic upper bound and density normalization calculations."""
+        # Arrange
+        def psi(x):
+            return x[:, 0] ** 4 * (1 - x[:, 0]) ** 6
+        dimension = 1
+        upper_bound = 0.4**4 * 0.6**6
+        density_integral = 1 / 2310
+        # Act
+        sampler = DigitalNetB2(dimension=dimension + 1, seed=7)
+        automatic = self.AcceptanceRejection(
+            sampler, psi, dimension
+        )
+        manual = self.AcceptanceRejection(
+            sampler, psi, dimension,
+            upper_bound=upper_bound,
+            density_integral=density_integral,
+        )
+        # Assert
+        automatic_samples = automatic.gen_samples(n=64)
+        manual_samples = manual.gen_samples(n=64)
+        np.testing.assert_allclose(automatic_samples, manual_samples, rtol=0, atol=1e-14)
+
     # --- AcceptanceRejectionReal tests ---
 
     def test_real_basic_shape(self):
