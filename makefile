@@ -1,7 +1,7 @@
 # Prefer an active environment, then the repository's conventional qmcpy Conda
 # environment, before falling back to a system interpreter. Override with
 # ``make PYTHON=/path/to/python <target>`` when needed.
-PYTHON ?= $(shell command -v python 2>/dev/null || { [ -n "$$CONDA_PREFIX" ] && command -v "$$CONDA_PREFIX/bin/python" 2>/dev/null; } || { command -v conda >/dev/null 2>&1 && conda run -n qmcpy python -c 'import sys; print(sys.executable)' 2>/dev/null; } || command -v python3 2>/dev/null)
+PYTHON ?= "$(shell command -v python 2>/dev/null || { [ -n "$$CONDA_PREFIX" ] && command -v "$$CONDA_PREFIX/bin/python" 2>/dev/null; } || { command -v conda >/dev/null 2>&1 && conda run -n qmcpy python -c 'import sys; print(sys.executable)' 2>/dev/null; } || command -v python3 2>/dev/null)"
 # Emit pytest-xdist argument if available; can be overridden on the make command line
 PYTEST_XDIST ?= $(shell $(PYTHON) scripts/pytest_xdist.py 2>/dev/null)
 PYTEST ?=
