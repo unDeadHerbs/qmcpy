@@ -8,6 +8,48 @@ from qmcpy.util import ParameterError, NotYetImplemented
 
 # TODO: Type all of the functions
 
+class SymbolicProxy:
+    """A proxy object for wrapping sympy variables so that they can
+    interact with comparison operators.
+
+    """
+    __array_priority__ = 1000
+
+    def __init__(self, expression):
+        self.expression = sp.sympify(expression)
+
+    def _sympy_(self):
+        return self.expression
+
+    def _binary(self, other, op):
+        #return SymbolicProxy(op(self.expression, sp.sympify(other)))
+        return op(self.expression, sp.sympify(other))
+
+    def _condition(self, other, cond):
+        return SymbolicProxy(sp.Piecewise((1,cond(self.expression, sp.sympify(other))), (0, True)))
+
+    def __add__(self, other): return self._binary(other, lambda a, b: a+b)
+    def __radd__(self, other): return self._binary(other, lambda a, b: b+a)
+    def __sub__(self, other): return self._binary(other, lambda a, b: a-b)
+    def __rsub__(self, other): return self._binary(other, lambda a, b: b-a)
+    def __mul__(self, other): return self._binary(other, lambda a, b: a*b)
+    def __rmul__(self, other): return self._binary(other, lambda a, b: b*a)
+    def __truediv__(self, other): return self._binary(other, lambda a, b: a/b)
+    def __rtruediv__(self, other): return self._binary(other, lambda a, b: b/a)
+    def __pow__(self, other): return self._binary(other, lambda a, b: a**b)
+    def __rpow__(self, other): return self._binary(other, lambda a, b: b**a)
+    def __neg__(self): return -self.expression
+    def __pos__(self): return self.expression
+    def __abs__(self): return sp.Abs(self.expression)
+
+    def __lt__(self, other): return self._condition(other, sp.Lt)
+    def __le__(self, other): return self._condition(other, sp.Le)
+    def __gt__(self, other): return self._condition(other, sp.Gt)
+    def __ge__(self, other): return self._condition(other, sp.Ge)
+    def __eq__(self, other): return self._condition(other, sp.Eq)
+    def __ne__(self, other): return self._condition(other, sp.Ne)
+
+
 class SymbolicInput:
     def __init__(self, symbols):
         if isinstance(symbols, int):
@@ -20,17 +62,17 @@ class SymbolicInput:
         self.shape=(len(self.symbols),1)
 
     def __getitem__(self, key):
-        # Support x[:, 0] convention
+        # Support the x[:, 0] convention.  Return a proxy so comparisons
+        # are indicator functions.
         if isinstance(key, tuple):
             _, col = key
             if isinstance(col, int):
-                return self.symbols[col]
+                return SymbolicProxy(self.symbols[col])
         elif isinstance(key, int):
-                return self.symbols[key]
-        else:
-            raise NotImplementedError(
-                f"Unsupported indexing: {key}"
-            )
+            # TODO: Do I need this mode, or is that invalid for the
+            # rest of qmcpy?
+            return SymbolicProxy(self.symbols[key])
+        raise NotImplementedError(f"Unsupported indexing: {key}")
 
 
 import numpy as np
@@ -45,8 +87,7 @@ def numpy_to_sympy():
 
     # TODO: There has to be a better and safer to do this.  I
     # particularly don't like that I'm reimplementing scipy's norm
-    # package.  Perhaps SymbolicInput can detect that it's being
-    # handed to these functions and then dispatch correctly?
+    # package.
     mapping = {
         np.sqrt: (np,sp.sqrt),
         np.exp: (np,sp.exp),
@@ -99,6 +140,9 @@ def to_symbolic(psi_function,dimensions):
             f"Unsupported Function Return Type: {type(psi)}"
         )
 
+    # Combine indicator arithmetic into a single Piecewise expression where
+    # possible, which is substantially easier for SymPy to differentiate.
+    psi = sp.piecewise_fold(psi)
     return psi,x
 
 
@@ -129,8 +173,35 @@ def enumerate_conditional_point(point):
 def symbolic_to_maximum(psi, x):
     """Find the maximum value that psi(x) takes over the unit interval."""
     def x_boundaries():
-        """Find all surfaces/boundry-conditions of the voluem under consideration."""
-        yield from itertools.product(*[(0, xi, 1) for xi in x.symbols])
+        """Find all surface/boundary-conditions for the volume under consideration."""
+        coordinate_values = []
+        conditions = [
+            condition
+            for piecewise in sp.preorder_traversal(psi)
+            if isinstance(piecewise, sp.Piecewise)
+            for _, condition in piecewise.args
+            if condition is not True
+        ]
+        # I don't really like this method.  I'd rather look at the set
+        # of all boundaries (including those of the cube) and then
+        # take the intersection of each subset of those boundaries,
+        # and then use those subspace as the solution spaces.
+        for xi in x.symbols:
+            values = [0, xi, 1]
+            for condition in conditions:
+                for relation in sp.preorder_traversal(condition):
+                    if isinstance(relation, sp.core.relational.Relational) \
+                       and xi in relation.free_symbols:
+                        try:
+                            roots = sp.solve(sp.Eq(relation.lhs, relation.rhs), xi)
+                        except (NotImplementedError, ValueError):
+                            # TODO: raise rather than silent?
+                            roots = []
+                        for root in roots:
+                            if not (root.free_symbols - {xi}):
+                                values.append(root)
+            coordinate_values.append(list(dict.fromkeys(values)))
+        yield from itertools.product(*coordinate_values)
 
     def candidates():
         """Generate all candidate (point, value) pairs."""

@@ -707,7 +707,7 @@ class TestSymbolicSolver(unittest.TestCase):
         self.assertAlmostEqual(density_integral, calc_density, delta=1e-10)
 
 
-    @unittest.expectedFailure
+    @unittest.expectedFailure # Not implemented in current solver.
     def test_auto_piecewise_function(self):
         """Functions with piecewise branches are currently
         unavailable.
@@ -715,19 +715,19 @@ class TestSymbolicSolver(unittest.TestCase):
         """
         
         def psi(x):
-            cond = (x[:, 0] < 0.5)
+            cond = ((3+x[:, 0]) < 3.5)
             return cond*x[:,0] + (1-cond)*(1-x[:,0])
 
         dimension = 1
-        max_at = 0.5
-        upper_bound = 1
-        density_integral = Rational(1,2)
+        max_at = (0.5,)
+        upper_bound = 0.5
+        density_integral = Rational(1,4)
         
         [upper_location, calc_upper], calc_density = max_norm(psi, dimension)
 
         self.assertEqual(max_at, upper_location)
         self.assertEqual(upper_bound, calc_upper)
-        self.assertEqual(density_integral, calc_density)
+        self.assertAlmostEqual(density_integral, calc_density, delta=1e-10)
 
         
     @unittest.expectedFailure # Not implemented in current solver.
