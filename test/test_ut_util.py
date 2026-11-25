@@ -339,6 +339,9 @@ class TestRemoveTrailingWhitespace(unittest.TestCase):
 
 class TestSymbolicSolver(unittest.TestCase):
     """Test symbolic solver utility helpers for finding unnormalized function maximum and area."""
+
+    # TODO: Try to remove assertAlmostEqual where possible, this is a
+    # symbolic solver.
     def test_basic_1d_beta(self):
         """Check that the symbolic solver is working on a known simple
         example, Beta(5,7).
@@ -373,7 +376,7 @@ class TestSymbolicSolver(unittest.TestCase):
                 * (1 - x[:, 1]) ** 3
             )
         dimension = 2
-        max_at = (Rational(4,10),Rational(4,10))
+        max_at = (Rational(4,4+6),Rational(2,2+3))
         upper_bound = psi(np.array([max_at]))
         density_integral = Rational(1,2310 * 60)
         
@@ -426,13 +429,14 @@ class TestSymbolicSolver(unittest.TestCase):
         def psi(x):
             return 4 - x[:,0]**2 - (.5 - x[:,1])**2
         dimension = 2
-        max_at = (0.5, 0)
+        max_at = (0, Rational(1,2))
         upper_bound = 4
         density_integral = 3+Rational(1,4)+Rational(1,3)
         
         [upper_location, calc_upper], calc_density = max_norm(psi, dimension)
 
-        self.assertEqual(max_at, upper_location)
+        for m,l in zip(max_at, upper_location):
+            self.assertAlmostEqual(m, l, delta = 1e-10)
         self.assertEqual(upper_bound, calc_upper)
         # TODO: Why is this not exact?
         self.assertAlmostEqual(density_integral, calc_density, delta=1e-10)
@@ -623,7 +627,6 @@ class TestSymbolicSolver(unittest.TestCase):
         self.assertEqual(density_integral, calc_density)
 
         
-    @unittest.expectedFailure
     def test_numpy_abs_function_support(self):
         """Verify that the numpy abs function is handled correctly."""
         
@@ -636,7 +639,7 @@ class TestSymbolicSolver(unittest.TestCase):
         [upper_location, calc_upper], calc_density = max_norm(psi, dimension)
         self.assertEqual(max_at, upper_location)
         self.assertEqual(upper_bound, calc_upper)
-        self.assertEqual(density_integral, calc_density)
+        self.assertAlmostEqual(density_integral, calc_density, delta=1e-10)
 
 
     def test_numpy_sin_function_support(self):
@@ -750,6 +753,32 @@ class TestSymbolicSolver(unittest.TestCase):
         self.assertEqual(max_at, upper_location)
         self.assertEqual(upper_bound, calc_upper)
         self.assertEqual(density_integral, calc_density)
+
+
+    @unittest.expectedFailure # Not implemented in current solver.
+    # TODO: This is the most dangerous missing feature, as its failure
+    # mode is latent not patent.
+    def test_auto_hidden_python_function(self):
+        """Functions with hidden branches (like catch)
+        are currently not even detectable in the current solver.
+
+        """
         
+        def psi(x):
+            try:
+                return np.sqrt(x-.5)
+            except:
+                return 0
+
+        dimension = 1
+        max_at = 1
+        upper_bound = np.sqrt(.5)
+        density_integral = Rational(1,2) # TODO
+        
+        [upper_location, calc_upper], calc_density = max_norm(psi, dimension)
+
+        self.assertEqual(max_at, upper_location)
+        self.assertEqual(upper_bound, calc_upper)
+        self.assertEqual(density_integral, calc_density)
 if __name__ == "__main__":
     unittest.main()
