@@ -225,9 +225,14 @@ def max_norm(psi_function,dimensions):
     maximum = symbolic_to_maximum(psi, x)
     # TODO: Extract calculating area to own function.
     pre_norm_area = sp.integrate(psi, *[(symbol, 0, 1) for symbol in x.symbols])
+    if pre_norm_area.is_real is None:
+        pre_norm_area = pre_norm_area.evalf(30)
     if not pre_norm_area.is_real:
         # TODO: No test checks this path.
         raise ParameterError(f"Non-real integral found (int[psi,(x,0,1)^d]={pre_norm_area}).")
+    if not pre_norm_area.is_finite:
+        # TODO: Is this checked?
+        raise ParameterError(f"Non-finite integral found (int[psi,(x,0,1)^d]={pre_norm_area}).")
     if 0>=pre_norm_area:
         raise ParameterError(f"Function integral must be strictly positive (int[psi,(x,0,1)^d]={pre_norm_area}).")
     return maximum,pre_norm_area

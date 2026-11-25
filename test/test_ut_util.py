@@ -680,7 +680,6 @@ class TestSymbolicSolver(unittest.TestCase):
         self.assertAlmostEqual(density_integral, calc_density, delta=1e-10)
 
 
-    @unittest.expectedFailure
     def test_unsolveable_outside_region_2d(self):
         """The derivative involves cos(x^2), which is very hard to
         find the zeros of.  However, on [0,1], sin(x^2) is increasing,
