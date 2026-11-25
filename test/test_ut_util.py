@@ -729,7 +729,6 @@ class TestSymbolicSolver(unittest.TestCase):
         self.assertAlmostEqual(density_integral, calc_density, delta=1e-10)
 
         
-    @unittest.expectedFailure # Not implemented in current solver.
     def test_auto_python_function(self):
         """Functions with calculations using code rather than logic
         are currently unavailable.
@@ -742,41 +741,25 @@ class TestSymbolicSolver(unittest.TestCase):
             return 1-x[0]
 
         dimension = 1
-        max_at = 0.5
-        upper_bound = 1
-        density_integral = Rational(1,2)
-        
-        [upper_location, calc_upper], calc_density = max_norm(psi, dimension)
-
-        self.assertEqual(max_at, upper_location)
-        self.assertEqual(upper_bound, calc_upper)
-        self.assertEqual(density_integral, calc_density)
+        with self.assertRaises(NotYetImplemented):        
+            max_norm(psi, dimension)
 
 
-    @unittest.expectedFailure # Not implemented in current solver.
-    # TODO: This is the most dangerous missing feature, as its failure
-    # mode is latent not patent.
     def test_auto_hidden_python_function(self):
         """Functions with hidden branches (like catch)
-        are currently not even detectable in the current solver.
+        are forbidden, even if not used.
 
         """
         
         def psi(x):
             try:
-                return np.sqrt(x-.5)
+                return np.sqrt(x+1)
             except:
                 return 0
 
         dimension = 1
-        max_at = 1
-        upper_bound = np.sqrt(.5)
-        density_integral = Rational(1,2) # TODO
         
-        [upper_location, calc_upper], calc_density = max_norm(psi, dimension)
-
-        self.assertEqual(max_at, upper_location)
-        self.assertEqual(upper_bound, calc_upper)
-        self.assertEqual(density_integral, calc_density)
+        with self.assertRaises(ParameterError):
+            max_norm(psi, dimension)
 if __name__ == "__main__":
     unittest.main()

@@ -109,6 +109,12 @@ class SymbolicProxy:
     def __eq__(self, other): return self._condition(other, sp.Eq)
     def __ne__(self, other): return self._condition(other, sp.Ne)
 
+    def __bool__(self):
+        raise NotYetImplemented(
+            "Conditional statements (if/while) are not supported when converting "
+            "a function to a symbolic expression."
+        )
+
 
 class SymbolicInput:
     def __init__(self, symbols):
@@ -334,6 +340,13 @@ def symbolic_to_maximum(psi, x):
 
 
 def max_norm(psi_function,dimensions):
+    def has_exception_handler(func):
+        # I'm not a fan of inspecting the function; but, I prefer it
+        # over silently doing the wrong thing.
+        import dis
+        return bool(dis.Bytecode(func).exception_entries)
+    if has_exception_handler(psi_function):
+        raise ParameterError("Exceptions as control flow are not supported.")
     psi, x = to_symbolic(psi_function,dimensions)
     maximum = symbolic_to_maximum(psi, x)
     # TODO: Extract calculating area to own function.
