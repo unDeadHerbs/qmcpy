@@ -707,7 +707,6 @@ class TestSymbolicSolver(unittest.TestCase):
         self.assertAlmostEqual(density_integral, calc_density, delta=1e-10)
 
 
-    @unittest.expectedFailure # Not implemented in current solver.
     def test_auto_piecewise_function(self):
         """Functions with piecewise branches are currently
         unavailable.

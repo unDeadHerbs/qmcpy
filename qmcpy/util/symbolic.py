@@ -1,10 +1,12 @@
 """Calculate the maximum and normalization constants for Acceptance Rejection."""
 
+from contextlib import contextmanager
+from qmcpy.util import ParameterError, NotYetImplemented
+from scipy.stats import norm
+from sympy.calculus.util import continuous_domain, singularities
 import itertools
 import numpy as np
 import sympy as sp
-from sympy.calculus.util import continuous_domain, singularities
-from qmcpy.util import ParameterError, NotYetImplemented
 
 # TODO: Type all of the functions
 
@@ -21,9 +23,67 @@ class SymbolicProxy:
     def _sympy_(self):
         return self.expression
 
+    # NumPy calls ufuncs (sqrt, exp, sin, square, power, ...) through this
+    # protocol.  Returning another proxy keeps symbolic expressions working
+    # through ordinary NumPy-based user functions.
+    _UFUNC_MAP = {
+        "sqrt": sp.sqrt,
+        "exp": sp.exp,
+        "log": sp.log,
+        "log2": lambda x: sp.log(x, 2),
+        "log10": lambda x: sp.log(x, 10),
+        "sin": sp.sin,
+        "cos": sp.cos,
+        "tan": sp.tan,
+        "sinh": sp.sinh,
+        "cosh": sp.cosh,
+        "tanh": sp.tanh,
+        "arcsin": sp.asin,
+        "arccos": sp.acos,
+        "arctan": sp.atan,
+        "absolute": sp.Abs,
+        "fabs": sp.Abs,
+        "square": lambda x: x**2,
+        "reciprocal": lambda x: 1/x,
+        "negative": lambda x: -x,
+        "positive": lambda x: x,
+        "power": lambda x, y: x**y,
+        "add": lambda x, y: x+y,
+        "subtract": lambda x, y: x-y,
+        "multiply": lambda x, y: x*y,
+        "true_divide": lambda x, y: x/y,
+        "divide": lambda x, y: x/y,
+        "maximum": sp.Max,
+        "minimum": sp.Min,
+    }
+
+    def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
+        if method != "__call__" or kwargs.get("out") is not None:
+            return NotImplemented
+        function = self._UFUNC_MAP.get(ufunc.__name__)
+        if function is None:
+            return NotImplemented
+        args = [
+            value.expression if isinstance(value, SymbolicProxy)
+            else sp.sympify(value)
+            for value in inputs
+        ]
+        result = function(*args)
+        return SymbolicProxy(result)
+
+    def __array_function__(self, func, types, args, kwargs):
+        # Handle the common NumPy function forms that are not ufuncs.
+        if func is np.sum:
+            values = args[0]
+            if isinstance(values, SymbolicProxy):
+                return values
+            return SymbolicProxy(sp.Add(*(sp.sympify(v) for v in values)))
+        return NotImplemented
+
     def _binary(self, other, op):
-        #return SymbolicProxy(op(self.expression, sp.sympify(other)))
-        return op(self.expression, sp.sympify(other))
+        if isinstance(other, SymbolicProxy):
+            return SymbolicProxy(op(self.expression, other._sympy_()))
+        return SymbolicProxy(op(self.expression, sp.sympify(other)))
 
     def _condition(self, other, cond):
         return SymbolicProxy(sp.Piecewise((1,cond(self.expression, sp.sympify(other))), (0, True)))
@@ -75,33 +135,13 @@ class SymbolicInput:
         raise NotImplementedError(f"Unsupported indexing: {key}")
 
 
-import numpy as np
-import sympy as sp
-from scipy.stats import norm
-from contextlib import contextmanager
-
-
 @contextmanager
-def numpy_to_sympy():
-    """Monkeypatch out numpy and scipy functions temporarily"""
-
+def scipy_to_sympy():
+    """Monkeypatch out scipy functions temporarily."""
     # TODO: There has to be a better and safer to do this.  I
     # particularly don't like that I'm reimplementing scipy's norm
     # package.
     mapping = {
-        np.sqrt: (np,sp.sqrt),
-        np.exp: (np,sp.exp),
-        np.log: (np,sp.log),
-        np.sin: (np,sp.sin),
-        np.cos: (np,sp.cos),
-        np.tan: (np,sp.tan),
-        np.sinh: (np,sp.sinh),
-        np.cosh: (np,sp.cosh),
-        np.tanh: (np,sp.tanh),
-        np.abs: (np,sp.Abs),
-        np.absolute: (np,sp.Abs),
-        np.square: (np,lambda z: z**2),
-        np.power: (np,lambda z, p: z**p),
         norm.pdf: (norm, lambda x, loc=0, scale=1:
                    sp.exp(-((x-loc)/scale)**2/2)
                    / (scale*sp.sqrt(2*sp.pi)))
@@ -118,12 +158,13 @@ def numpy_to_sympy():
         for name, (package, func) in original.items():
             setattr(package, name, func)
 
-        
 def to_symbolic(psi_function,dimensions):
     """Convert a python function (np[data,dimensions] -> number) to a sympy expression."""
     x = SymbolicInput(dimensions)
-    with numpy_to_sympy():
+    with scipy_to_sympy():
         psi = psi_function(x)
+    if isinstance(psi, SymbolicProxy):
+        psi = psi._sympy_()
     if isinstance(psi, np.ndarray):
         psi = psi.tolist()
         if len(psi) == 1:
