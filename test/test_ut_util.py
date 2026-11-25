@@ -3,6 +3,7 @@ from tempfile import TemporaryDirectory
 import unittest
 
 import numpy as np
+from sympy import Rational
 from scripts.remove_trailing_whitespace import remove_trailing_whitespace
 
 from qmcpy.util import (
@@ -27,6 +28,7 @@ from qmcpy.util.transforms import (
     tf_explinear,
     tf_explinear_inv,
 )
+from qmcpy.util.symbolic import max_norm
 
 
 class TestTorchNumpyOps(unittest.TestCase):
@@ -334,5 +336,405 @@ class TestRemoveTrailingWhitespace(unittest.TestCase):
             self.assertEqual(path.read_bytes(), expected)
 
 
+
+class TestSymbolicSolver(unittest.TestCase):
+    """Test symbolic solver utility helpers for finding unnormalized function maximum and area."""
+    def test_basic_1d_beta(self):
+        """Check that the symbolic solver is working on a known simple
+        example, Beta(5,7).
+
+        """
+
+        def psi(x):
+            return x[:, 0] ** 4 * (1 - x[:, 0]) ** 6
+        dimension = 1
+        max_at = (Rational(4,10),)
+        upper_bound = psi(np.array([max_at]))
+        density_integral = Rational(1,2310)
+
+        [upper_location, calc_upper], calc_density = max_norm(psi, dimension)
+
+        self.assertEqual(max_at, upper_location)
+        self.assertEqual(upper_bound, calc_upper)
+        self.assertEqual(density_integral, calc_density)
+
+        
+    def test_basic_2d_beta(self):
+        """Check that the symbolic solver is working on a known simple
+        2D example.
+
+        """
+        
+        def psi(x):
+            return (
+                x[:, 0] ** 4
+                * (1 - x[:, 0]) ** 6
+                * x[:, 1] ** 2
+                * (1 - x[:, 1]) ** 3
+            )
+        dimension = 2
+        max_at = (Rational(4,10),Rational(4,10))
+        upper_bound = psi(np.array([max_at]))
+        density_integral = Rational(1,2310 * 60)
+        
+        [upper_location, calc_upper], calc_density = max_norm(psi, dimension)
+        
+        self.assertEqual(max_at, upper_location)
+        self.assertEqual(upper_bound, calc_upper)
+        self.assertEqual(density_integral, calc_density)
+
+        
+    def test_maximum_on_1d_boundary(self):
+        """The maximum occurs at x=1, which is not at an interior
+        critical point.
+
+        """
+        
+        def psi(x):
+            return x[:, 0] ** 2
+        dimension = 1
+        max_at = (1,)
+        upper_bound = 1
+        density_integral = Rational(1,3)
+        
+        [upper_location, calc_upper], calc_density = max_norm(psi, dimension)
+
+        self.assertEqual(max_at, upper_location)
+        self.assertEqual(upper_bound, calc_upper)
+        self.assertEqual(density_integral, calc_density)
+
+        
+    def test_maximum_on_2d_corner(self):
+        """The maximum occurs at (1, 0), on a corner of the square."""
+        
+        def psi(x):
+            return x[:, 0] ** 2 * (1 - x[:, 1]) ** 3
+        dimension = 2
+        max_at = (1,0)
+        upper_bound = 1
+        density_integral = Rational(1,12)
+        
+        [upper_location, calc_upper], calc_density = max_norm(psi, dimension)
+
+        self.assertEqual(max_at, upper_location)
+        self.assertEqual(upper_bound, calc_upper)
+        self.assertEqual(density_integral, calc_density)
+
+
+    def test_maximum_on_2d_face(self):
+        """The maximum occurs at (0.5, 0), on a face of the square."""
+        def psi(x):
+            return 4 - x[:,0]**2 - (.5 - x[:,1])**2
+        dimension = 2
+        max_at = (0.5, 0)
+        upper_bound = 4
+        density_integral = 3+Rational(1,4)+Rational(1,3)
+        
+        [upper_location, calc_upper], calc_density = max_norm(psi, dimension)
+
+        self.assertEqual(max_at, upper_location)
+        self.assertEqual(upper_bound, calc_upper)
+        # TODO: Why is this not exact?
+        self.assertAlmostEqual(density_integral, calc_density, delta=1e-10)
+
+
+    def test_maximum_outside_of_domain(self):
+        """The global maximum critical point is outside of the domain,
+        at x=-1.
+        
+        """
+        
+        def psi(x):
+            return (x[:, 0]+3) ** 4 * (2 - x[:, 0]) ** 6
+        dimension = 1
+        max_at = (0,)
+        upper_bound = 5184
+        density_integral = Rational(951047,462)
+        
+        [upper_location, calc_upper], calc_density = max_norm(psi, dimension)
+
+        self.assertEqual(max_at, upper_location)
+        self.assertEqual(upper_bound, calc_upper)
+        self.assertEqual(density_integral, calc_density)
+
+
+    def test_constant_density(self):
+        """A constant density has no critical points.
+
+        """
+        
+        def psi(x):
+            return np.full(x.shape[0], 3.0)
+        dimension=1
+        upper_bound=3.0
+        density_integral=3.0
+        
+        [upper_location, calc_upper], calc_density = max_norm(psi, dimension)
+        
+        self.assertEqual(upper_bound, calc_upper)
+        self.assertEqual(density_integral, calc_density)
+
+        
+    def test_multiple_boundary_candidates(self):
+        """There are candidate values for the maximum in both the
+        interior and on the boundary.
+
+        """
+        
+        def psi(x):
+            return 1 + x[:, 0] * (1 - x[:, 0])
+        dimension=1
+        max_at = (Rational(1,2),)
+        upper_bound=Rational(5,4)
+        density_integral = 1+Rational(1,6)
+        
+        [upper_location, calc_upper], calc_density = max_norm(psi, dimension)
+
+        self.assertEqual(max_at, upper_location)
+        self.assertEqual(upper_bound, calc_upper)
+        self.assertEqual(density_integral, calc_density)
+
+
+    def test_density_with_no_finite_integral(self):
+        """The integral diverges at x=0."""
+        
+        def psi(x):
+            return 1 / x[:, 0]
+        dimension = 1
+        with self.assertRaises(ParameterError):
+            max_norm(psi, dimension)
+
+
+    def test_density_with_no_finite_maximum(self):
+        """The density is integrable but unbounded at x=0."""
+        
+        def psi(x):
+            return (x[:, 0]) ** (-1/2)
+        dimension = 1
+        with self.assertRaises(ParameterError):
+            max_norm(psi, dimension)
+
+
+    def test_negative_density(self):
+        """A negative density must be rejected.
+
+        Note: This test cannot be exhaustive, if the density is not
+        negative at one of the projected critical points, it will not
+        be detected.
+
+        """
+        
+        def psi(x):
+            return x[:, 0] - 1/2
+        dimension = 1
+        with self.assertRaises(ParameterError):
+            max_norm(psi, dimension)
+
+        
+    def test_zero_integral(self):
+        """A density that is identically zero is invalid."""
+        
+        def psi(x):
+            return 0
+        dimension = 1
+        with self.assertRaises(ParameterError):
+            max_norm(psi, dimension)
+
+
+    def test_zero_maximum(self):
+        """A non-positive density cannot define a valid rejection sampler."""
+
+        def psi(x):
+            return -(x[:, 0] - 1/2) ** 2
+        dimension = 1
+        with self.assertRaises(ParameterError):
+            max_norm(psi, dimension)
+
+
+    def test_multiple_equal_global_maxima(self):
+        """All global maxima have the same value, find that value."""
+        def psi(x):
+            return 1 - x[:, 0] ** 2 * (1 - x[:, 0]) ** 2
+        dimension = 1
+
+        # TODO: This test actually has a greater global critical point
+        # maxima in the complex domain?
+        
+        # Local extrema occur at x=0 and x=1, with value 1, and at
+        # x=1/2, with value 15/16. The global maximum is therefore 1.
+        upper_bound=1
+        density_integral=1-Rational(1, 30)
+
+        [upper_location, calc_upper], calc_density = max_norm(psi, dimension)
+
+        # assert In upper_location [0,1]
+        self.assertEqual(upper_bound, calc_upper)
+        self.assertEqual(density_integral, calc_density)
+        
+
+    def test_multiple_different_local_maxima_strictly_within_domain(self):
+        """Several local maxima have different values, find the correct one."""
+        
+        def psi(x):
+            return (3-(x[:, 0]-0.1) ** 2) * (2-(0.9 - x[:, 0]) ** 2)
+        dimension = 1
+        
+        # Local extrema occur at x=0.1 and x=0.9, with values _ and _ respectively.
+        upper_bound=max(
+            psi(np.array([[0.1]])),
+            psi(np.array([[0.9]])),
+        )
+        #TODO: density_integral=Rational(151, 15)
+
+        [upper_location, calc_upper], calc_density = max_norm(psi, dimension)
+
+        # TODO: self.assertEqual(max_at, upper_location)
+        # TODO: self.assertEqual(upper_bound, calc_upper)
+        # TODO: self.assertEqual(density_integral, calc_density)
+        
+    
+    def test_numpy_sqrt_function_support(self):
+        """Verify that the numpy sqrt function is handled correctly."""
+        
+        def psi(x):
+            return np.sqrt(x[:, 0])
+        dimension=1
+        max_at = (1,)
+        upper_bound=1
+        density_integral=Rational(2,3)
+        [upper_location, calc_upper], calc_density = max_norm(psi, dimension)
+        self.assertEqual(max_at, upper_location)
+        self.assertEqual(upper_bound, calc_upper)
+        self.assertEqual(density_integral, calc_density)
+
+        
+    @unittest.expectedFailure
+    def test_numpy_abs_function_support(self):
+        """Verify that the numpy abs function is handled correctly."""
+        
+        def psi(x):
+            return 1-np.abs(.5-x[:, 0])
+        dimension=1
+        max_at = (.5,)
+        upper_bound=1
+        density_integral=Rational(3,4)
+        [upper_location, calc_upper], calc_density = max_norm(psi, dimension)
+        self.assertEqual(max_at, upper_location)
+        self.assertEqual(upper_bound, calc_upper)
+        self.assertEqual(density_integral, calc_density)
+
+
+    def test_numpy_sin_function_support(self):
+        """Verify that the numpy sin function is handled correctly."""
+        
+        from scipy.integrate import quad
+        def psi(x):
+            return np.sin(x[:, 0])
+        dimension=1
+        max_at = (1,)
+        upper_bound=np.sin(1)
+        density_integral=quad(lambda t: np.sin(t), 0, 1)[0]
+        [upper_location, calc_upper], calc_density = max_norm(psi, dimension)
+        self.assertEqual(max_at, upper_location)
+        self.assertAlmostEqual(upper_bound, calc_upper,delta=1e-10)
+        self.assertAlmostEqual(density_integral, calc_density,delta=1e-10)
+
+        
+    def test_unsolveable_outside_region_1d(self):
+        """The derivative involves cos(x^2), which is very hard to
+        find the zeros of.  However, on [0,1], sin(x^2) is increasing,
+        so the maximum is at x=1.
+
+        """
+
+        from scipy.integrate import quad
+        def psi(x):
+            return 2 + np.sin(x[:, 0] ** 2)
+        dimension = 1
+        max_at = (1,)
+        upper_bound = 2 + np.sin(1.0)
+        density_integral = 2 + quad(lambda t: np.sin(t**2), 0, 1)[0]
+        
+        [upper_location, calc_upper], calc_density = max_norm(psi, dimension)
+
+        self.assertEqual(max_at, upper_location)
+        self.assertAlmostEqual(upper_bound, calc_upper, delta=1e-10)
+        self.assertAlmostEqual(density_integral, calc_density, delta=1e-10)
+
+
+    @unittest.expectedFailure
+    def test_unsolveable_outside_region_2d(self):
+        """The derivative involves cos(x^2), which is very hard to
+        find the zeros of.  However, on [0,1], sin(x^2) is increasing,
+        so the maximum is at x=1.
+
+        """
+        
+        from scipy.integrate import dblquad
+        def psi(x):
+            return 1 + np.sin(x[:, 0] * x[:, 1])
+        dimension = 2
+        max_at = (1,1)
+        upper_bound = 1 + np.sin(1.0)
+        density_integral = 1 + dblquad(
+            lambda y, x: np.sin(x * y),
+            0, 1,
+            lambda x: 0,
+            lambda x: 1,
+        )[0]
+        
+        [upper_location, calc_upper], calc_density = max_norm(psi, dimension)
+
+        self.assertEqual(max_at, upper_location)
+        self.assertAlmostEqual(upper_bound, calc_upper, delta=1e-10)
+        self.assertAlmostEqual(density_integral, calc_density, delta=1e-10)
+
+
+    @unittest.expectedFailure
+    def test_auto_piecewise_function(self):
+        """Functions with piecewise branches are currently
+        unavailable.
+
+        """
+        
+        def psi(x):
+            cond = (x[:, 0] < 0.5)
+            return cond*x[:,0] + (1-cond)*(1-x[:,0])
+
+        dimension = 1
+        max_at = 0.5
+        upper_bound = 1
+        density_integral = Rational(1,2)
+        
+        [upper_location, calc_upper], calc_density = max_norm(psi, dimension)
+
+        self.assertEqual(max_at, upper_location)
+        self.assertEqual(upper_bound, calc_upper)
+        self.assertEqual(density_integral, calc_density)
+
+        
+    @unittest.expectedFailure # Not implemented in current solver.
+    def test_auto_python_function(self):
+        """Functions with calculations using code rather than logic
+        are currently unavailable.
+
+        """
+        
+        def psi(x):
+            if x[0] < 0.5:
+                return x[0]
+            return 1-x[0]
+
+        dimension = 1
+        max_at = 0.5
+        upper_bound = 1
+        density_integral = Rational(1,2)
+        
+        [upper_location, calc_upper], calc_density = max_norm(psi, dimension)
+
+        self.assertEqual(max_at, upper_location)
+        self.assertEqual(upper_bound, calc_upper)
+        self.assertEqual(density_integral, calc_density)
+        
 if __name__ == "__main__":
     unittest.main()
