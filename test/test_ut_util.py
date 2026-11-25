@@ -592,7 +592,22 @@ class TestSymbolicSolver(unittest.TestCase):
         # TODO: self.assertEqual(upper_bound, calc_upper)
         # TODO: self.assertEqual(density_integral, calc_density)
         
-    
+
+    def test_scipy_stats_support(self):
+        """Use a function from scipy stats."""
+        from scipy.integrate import quad
+        from scipy.stats import norm
+        def psi(x):
+            return norm.pdf(x[:, 0], loc=0, scale=1)
+        dimension=1
+        max_at = (0,)
+        upper_bound=psi(np.array([max_at]))
+        density_integral=quad(lambda t: norm.pdf(t), 0, 1)[0]
+        [upper_location, calc_upper], calc_density = max_norm(psi, dimension)
+        self.assertEqual(max_at, upper_location)
+        self.assertAlmostEqual(upper_bound, calc_upper, delta=1e-10) # Technically exactly 1/sqrt(tau)
+        self.assertAlmostEqual(density_integral, calc_density, delta=1e-10)
+        
     def test_numpy_sqrt_function_support(self):
         """Verify that the numpy sqrt function is handled correctly."""
         

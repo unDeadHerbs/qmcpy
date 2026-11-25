@@ -33,41 +33,46 @@ class SymbolicInput:
 
 import numpy as np
 import sympy as sp
+from scipy.stats import norm
 from contextlib import contextmanager
 
 
 @contextmanager
 def numpy_to_sympy():
-    # Monkeypatch out the numpy functions temporarily
+    """Monkeypatch out numpy and scipy functions temporarily"""
+
+    # TODO: There has to be a better and safer to do this.  I
+    # particularly don't like that I'm reimplementing scipy's norm
+    # package.
     mapping = {
-        np.sqrt: sp.sqrt,
-        np.exp: sp.exp,
-        np.log: sp.log,
-        np.sin: sp.sin,
-        np.cos: sp.cos,
-        np.tan: sp.tan,
-        np.sinh: sp.sinh,
-        np.cosh: sp.cosh,
-        np.tanh: sp.tanh,
-        np.abs: sp.Abs,
-        np.absolute: sp.Abs,
-        np.square: lambda z: z**2,
-        np.power: lambda z, p: z**p,
+        np.sqrt: (np,sp.sqrt),
+        np.exp: (np,sp.exp),
+        np.log: (np,sp.log),
+        np.sin: (np,sp.sin),
+        np.cos: (np,sp.cos),
+        np.tan: (np,sp.tan),
+        np.sinh: (np,sp.sinh),
+        np.cosh: (np,sp.cosh),
+        np.tanh: (np,sp.tanh),
+        np.abs: (np,sp.Abs),
+        np.absolute: (np,sp.Abs),
+        np.square: (np,lambda z: z**2),
+        np.power: (np,lambda z, p: z**p),
+        norm.pdf: (norm, lambda x, loc=0, scale=1:
+                   sp.exp(-((x-loc)/scale)**2/2)
+                   / (scale*sp.sqrt(2*sp.pi)))
+        # TODO: More functions from norm
     }
-
     original = {}
-
     try:
-        for np_func, sp_func in mapping.items():
-            name = np_func.__name__
-            original[name] = getattr(np, name)
-            setattr(np, name, sp_func)
-
+        for func, (package, sp_func) in mapping.items():
+            name = func.__name__
+            original[name] = (package,getattr(package, name))
+            setattr(package, name, sp_func)
         yield
-
     finally:
-        for name, func in original.items():
-            setattr(np, name, func)
+        for name, (package, func) in original.items():
+            setattr(package, name, func)
 
         
 def to_symbolic(psi_function,dimensions):
