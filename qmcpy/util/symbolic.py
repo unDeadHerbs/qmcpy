@@ -45,7 +45,8 @@ def numpy_to_sympy():
 
     # TODO: There has to be a better and safer to do this.  I
     # particularly don't like that I'm reimplementing scipy's norm
-    # package.
+    # package.  Perhaps SymbolicInput can detect that it's being
+    # handed to these functions and then dispatch correctly?
     mapping = {
         np.sqrt: (np,sp.sqrt),
         np.exp: (np,sp.exp),
