@@ -1,3 +1,5 @@
+"""Calculate the maximum and normalization constants for Acceptance Rejection."""
+
 import itertools
 import numpy as np
 import sympy as sp
