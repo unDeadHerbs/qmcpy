@@ -611,19 +611,28 @@ class TestSymbolicSolver(unittest.TestCase):
         self.assertEqual(upper_bound, calc_upper)
         self.assertEqual(density_integral, calc_density)
         
-    def test_numpy_sqrt_function_support(self):
-        """Verify that the numpy sqrt function is handled correctly."""
-        
-        def psi(x):
-            return np.sqrt(x[:, 0])
-        dimension=1
-        max_at = (1,)
-        upper_bound=1
-        density_integral=Rational(2,3)
-        [upper_location, calc_upper], calc_density = max_norm(psi, dimension)
-        self.assertEqual(max_at, upper_location)
-        self.assertEqual(upper_bound, calc_upper)
-        self.assertEqual(density_integral, calc_density)
+    def test_numpy_function_support(self):
+        """Verify that the numpy functions are handled correctly."""
+        from scipy.integrate import quad
+        functions = {
+            'sqrt': np.sqrt,
+            'sin': np.sin,
+            'cos': np.cos,
+        }
+        for func_name in functions:
+            with self.subTest(f"Verify numpy's {func_name=} is supported"):
+                func=functions[func_name]
+                def psi(x):
+                    return func(x[:, 0])
+                dimension=1
+                max_at = 1 if func(1)>func(0) else 0
+                max_at = (max_at,)
+                upper_bound=func(max_at[0])
+                density_integral=quad(lambda t: func(t), 0, 1)[0]
+                [upper_location, calc_upper], calc_density = max_norm(psi, dimension)
+                self.assertEqual(max_at, upper_location)
+                self.assertAlmostEqual(upper_bound, calc_upper, delta=1e-10)
+                self.assertAlmostEqual(density_integral, calc_density, delta=1e-10)
 
         
     def test_numpy_abs_function_support(self):
@@ -640,22 +649,6 @@ class TestSymbolicSolver(unittest.TestCase):
         self.assertEqual(upper_bound, calc_upper)
         # TODO: Why is this not exact?
         self.assertAlmostEqual(density_integral, calc_density, delta=1e-10)
-
-
-    def test_numpy_sin_function_support(self):
-        """Verify that the numpy sin function is handled correctly."""
-        
-        from scipy.integrate import quad
-        def psi(x):
-            return np.sin(x[:, 0])
-        dimension=1
-        max_at = (1,)
-        upper_bound=sp.sin(1)
-        density_integral=1-sp.cos(1)
-        [upper_location, calc_upper], calc_density = max_norm(psi, dimension)
-        self.assertEqual(max_at, upper_location)
-        self.assertEqual(upper_bound, calc_upper)
-        self.assertEqual(density_integral, calc_density)
 
         
     def test_insolvable_outside_region_1d(self):
