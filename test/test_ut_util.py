@@ -3,6 +3,7 @@ from tempfile import TemporaryDirectory
 import unittest
 
 import numpy as np
+import sympy as sp
 from sympy import Rational
 from scripts.remove_trailing_whitespace import remove_trailing_whitespace
 
@@ -340,8 +341,6 @@ class TestRemoveTrailingWhitespace(unittest.TestCase):
 class TestSymbolicSolver(unittest.TestCase):
     """Test symbolic solver utility helpers for finding unnormalized function maximum and area."""
 
-    # TODO: Try to remove assertAlmostEqual where possible, this is a
-    # symbolic solver.
     def test_basic_1d_beta(self):
         """Check that the symbolic solver is working on a known simple
         example, Beta(5,7).
@@ -429,14 +428,14 @@ class TestSymbolicSolver(unittest.TestCase):
         def psi(x):
             return 4 - x[:,0]**2 - (.5 - x[:,1])**2
         dimension = 2
-        max_at = (0, Rational(1,2))
+        max_at = (0, 0.5)
         upper_bound = 4
         density_integral = 3+Rational(1,4)+Rational(1,3)
         
         [upper_location, calc_upper], calc_density = max_norm(psi, dimension)
 
         for m,l in zip(max_at, upper_location):
-            self.assertAlmostEqual(m, l, delta = 1e-10)
+            self.assertEqual(m, l)
         self.assertEqual(upper_bound, calc_upper)
         # TODO: Why is this not exact?
         self.assertAlmostEqual(density_integral, calc_density, delta=1e-10)
@@ -605,12 +604,12 @@ class TestSymbolicSolver(unittest.TestCase):
             return norm.pdf(x[:, 0], loc=0, scale=1)
         dimension=1
         max_at = (0,)
-        upper_bound=psi(np.array([max_at]))
-        density_integral=quad(lambda t: norm.pdf(t), 0, 1)[0]
+        upper_bound=sp.sqrt(1/(2*sp.pi))
+        density_integral=sp.erf(sp.sqrt(2)/2)/2
         [upper_location, calc_upper], calc_density = max_norm(psi, dimension)
         self.assertEqual(max_at, upper_location)
-        self.assertAlmostEqual(upper_bound, calc_upper, delta=1e-10) # Technically exactly 1/sqrt(tau)
-        self.assertAlmostEqual(density_integral, calc_density, delta=1e-10)
+        self.assertEqual(upper_bound, calc_upper)
+        self.assertEqual(density_integral, calc_density)
         
     def test_numpy_sqrt_function_support(self):
         """Verify that the numpy sqrt function is handled correctly."""
@@ -639,6 +638,7 @@ class TestSymbolicSolver(unittest.TestCase):
         [upper_location, calc_upper], calc_density = max_norm(psi, dimension)
         self.assertEqual(max_at, upper_location)
         self.assertEqual(upper_bound, calc_upper)
+        # TODO: Why is this not exact?
         self.assertAlmostEqual(density_integral, calc_density, delta=1e-10)
 
 
@@ -650,15 +650,15 @@ class TestSymbolicSolver(unittest.TestCase):
             return np.sin(x[:, 0])
         dimension=1
         max_at = (1,)
-        upper_bound=np.sin(1)
-        density_integral=quad(lambda t: np.sin(t), 0, 1)[0]
+        upper_bound=sp.sin(1)
+        density_integral=1-sp.cos(1)
         [upper_location, calc_upper], calc_density = max_norm(psi, dimension)
         self.assertEqual(max_at, upper_location)
-        self.assertAlmostEqual(upper_bound, calc_upper,delta=1e-10)
-        self.assertAlmostEqual(density_integral, calc_density,delta=1e-10)
+        self.assertEqual(upper_bound, calc_upper)
+        self.assertEqual(density_integral, calc_density)
 
         
-    def test_unsolveable_outside_region_1d(self):
+    def test_insolvable_outside_region_1d(self):
         """The derivative involves cos(x^2), which is very hard to
         find the zeros of.  However, on [0,1], sin(x^2) is increasing,
         so the maximum is at x=1.
@@ -670,17 +670,19 @@ class TestSymbolicSolver(unittest.TestCase):
             return 2 + np.sin(x[:, 0] ** 2)
         dimension = 1
         max_at = (1,)
-        upper_bound = 2 + np.sin(1.0)
+        upper_bound = sp.sin(1)+2
+        # There is an exact answer; but, it's more complicated to
+        # verify than reading this.
         density_integral = 2 + quad(lambda t: np.sin(t**2), 0, 1)[0]
         
         [upper_location, calc_upper], calc_density = max_norm(psi, dimension)
 
         self.assertEqual(max_at, upper_location)
-        self.assertAlmostEqual(upper_bound, calc_upper, delta=1e-10)
+        self.assertEqual(upper_bound, calc_upper)
         self.assertAlmostEqual(density_integral, calc_density, delta=1e-10)
 
 
-    def test_unsolveable_outside_region_2d(self):
+    def test_unsolvable_outside_region_2d(self):
         """The derivative involves cos(x^2), which is very hard to
         find the zeros of.  However, on [0,1], sin(x^2) is increasing,
         so the maximum is at x=1.
@@ -692,7 +694,7 @@ class TestSymbolicSolver(unittest.TestCase):
             return 1 + np.sin(x[:, 0] * x[:, 1])
         dimension = 2
         max_at = (1,1)
-        upper_bound = 1 + np.sin(1.0)
+        upper_bound = sp.sin(1)+1
         density_integral = 1 + dblquad(
             lambda y, x: np.sin(x * y),
             0, 1,
@@ -703,7 +705,7 @@ class TestSymbolicSolver(unittest.TestCase):
         [upper_location, calc_upper], calc_density = max_norm(psi, dimension)
 
         self.assertEqual(max_at, upper_location)
-        self.assertAlmostEqual(upper_bound, calc_upper, delta=1e-10)
+        self.assertEqual(upper_bound, calc_upper)
         self.assertAlmostEqual(density_integral, calc_density, delta=1e-10)
 
 
@@ -726,6 +728,7 @@ class TestSymbolicSolver(unittest.TestCase):
 
         self.assertEqual(max_at, upper_location)
         self.assertEqual(upper_bound, calc_upper)
+        # TODO: Why is this not exact?
         self.assertAlmostEqual(density_integral, calc_density, delta=1e-10)
 
         
