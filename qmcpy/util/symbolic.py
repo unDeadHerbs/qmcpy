@@ -268,7 +268,10 @@ def symbolic_to_maximum(psi, x):
         # I don't really like this method.  I'd rather look at the set
         # of all boundaries (including those of the cube) and then
         # take the intersection of each subset of those boundaries,
-        # and then use those subspace as the solution spaces.
+        # and then use those subspace as the solution spaces; but,
+        # that will probably require replacing the simple `subs` call
+        # below with solving for some of the variables to substitute
+        # them in and reduce the equation's order.
         for xi in x.symbols:
             values = [0, xi, 1]
             for condition in conditions:
