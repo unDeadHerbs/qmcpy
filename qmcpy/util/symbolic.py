@@ -145,8 +145,8 @@ class SymbolicInput:
 def scipy_to_sympy():
     """Monkeypatch out scipy functions temporarily."""
     # TODO: There has to be a better and safer to do this.  I
-    # particularly don't like that I'm reimplementing scipy's norm
-    # package.
+    # particularly don't like that I'm reimplementing complex
+    # functions.
     mapping = {
         norm.pdf: (norm, lambda x, loc=0, scale=1:
                    sp.exp(-((x-loc)/scale)**2/2)
@@ -182,7 +182,7 @@ def to_symbolic(psi_function,dimensions):
             )
     if isinstance(psi, (int, float, np.number)):
         psi = sp.sympify(psi)
-    elif False: # TODO: not isinstance(psi,sp.something)
+    elif not isinstance(psi,(sp.Basic, sp.Expr)):
         raise NotImplementedError(
             f"Unsupported Function Return Type: {type(psi)}"
         )
@@ -242,8 +242,7 @@ def symbolic_to_maximum(psi, x):
                         try:
                             roots = sp.solve(sp.Eq(relation.lhs, relation.rhs), xi)
                         except (NotImplementedError, ValueError):
-                            # TODO: raise rather than silent?
-                            roots = []
+                            raise # TODO: Find an example problem and clean up the error message.
                         for root in roots:
                             if not (root.free_symbols - {xi}):
                                 values.append(root)
@@ -286,7 +285,7 @@ def symbolic_to_maximum(psi, x):
                     try:
                         stationary = sp.nonlinsolve(gradients, free)
                     except ValueError:
-                        print(f"# TODO: This is probably an error, rather than masking?")
+                        raise # TODO: Find an example of this problem and clean up the error message.
                         return []
                     stationary = [
                         point
@@ -294,8 +293,7 @@ def symbolic_to_maximum(psi, x):
                         for point in enumerate_conditional_point(cpoint)
                     ]
                     if not isinstance(stationary, (sp.FiniteSet, list)):
-                        print(f"# TODO: Raise an error?")
-                        return []
+                        raise NotImplementedError("Stationary points of equation is not manageable.")
                     return [
                         dict(zip(free, point))
                         for point in stationary
