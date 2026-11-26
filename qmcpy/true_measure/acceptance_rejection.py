@@ -4,6 +4,8 @@ from ..discrete_distribution.abstract_discrete_distribution import (
     AbstractDiscreteDistribution,
 )
 from ..util import MethodImplementationError, ParameterError
+# TODO: Import this correctly
+from qmcpy.util.symbolic import max_norm
 import numpy as np
 import warnings
 import math
@@ -105,12 +107,16 @@ class AcceptanceRejection(AbstractTrueMeasure):
             )
         self.target_dim = self.d - 1
         self.target_density = target_density
+        symbolic_work = None
         if upper_bound is None:
-            raise NotImplementedError("upper_bound = None")
+            symbolic_work = max_norm(self.target_density, self.target_dim)
+            self.upper_bound = symbolic_work[0][1]
         else:
             self.upper_bound = float(upper_bound)
         if density_integral is None:
-            raise NotImplementedError("density_integral = None")
+            if symbolic_work is None:
+                symbolic_work = max_norm(self.target_density, self.target_dim)
+            self.density_integral = symbolic_work[1]
         else:
             self.density_integral = float(density_integral)
         if self.upper_bound <= 0:

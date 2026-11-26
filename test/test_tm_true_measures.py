@@ -2777,44 +2777,49 @@ class TestAcceptanceRejection(unittest.TestCase):
             )
 
     def test_auto_constants_psi(self):
-        """An integration test for automatic upper bound and density normalization calculations."""
-        # Arrange
+        """An integration test for automatic upper bound and density
+        normalization calculations.
+
+        """
         dimension = 1
         upper_bound = 2
         density_integral = 1
-        # Act
+
         sampler = DigitalNetB2(dimension=dimension + 1, seed=7)
         automatic = self.AcceptanceRejection(
-            sampler, self.psi, dimension
+            sampler, self.psi
         )
         manual = self.AcceptanceRejection(
-            sampler, self.psi, dimension,
+            sampler, self.psi,
             upper_bound=upper_bound,
             density_integral=density_integral,
         )
-        # Assert
+
         automatic_samples = automatic.gen_samples(n=64)
         manual_samples = manual.gen_samples(n=64)
         np.testing.assert_allclose(automatic_samples, manual_samples, rtol=0, atol=1e-14)
 
 
     def test_auto_constants_psi_real(self):
-        """An integration test for automatic upper bound and density normalization calculations."""
-        # Arrange
+        """An integration test for automatic upper bound and density
+        normalization calculations.
+
+        """
+
         dimension = 1
-        upper_bound = self.psi_real([[0]])
+        upper_bound = self.psi_real(np.array([[0]]))[0]
         density_integral = 1 # TODO
-        # Act
+
         sampler = DigitalNetB2(dimension=dimension + 1, seed=7)
         automatic = self.AcceptanceRejection(
-            sampler, self.psi_real, dimension
+            sampler, self.psi_real,
         )
         manual = self.AcceptanceRejection(
-            sampler, self.psi_real, dimension,
+            sampler, self.psi_real,
             upper_bound=upper_bound,
             density_integral=density_integral,
         )
-        # Assert
+
         automatic_samples = automatic.gen_samples(n=64)
         manual_samples = manual.gen_samples(n=64)
         np.testing.assert_allclose(automatic_samples, manual_samples, rtol=0, atol=1e-14)            

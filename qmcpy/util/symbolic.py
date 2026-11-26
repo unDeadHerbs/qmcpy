@@ -339,6 +339,7 @@ def symbolic_to_maximum(psi, x):
     )
 
 
+# TODO: Give this a better name
 def max_norm(psi_function,dimensions):
     def has_exception_handler(func):
         # I'm not a fan of inspecting the function; but, I prefer it
