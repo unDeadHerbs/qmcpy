@@ -2806,9 +2806,10 @@ class TestAcceptanceRejection(unittest.TestCase):
 
         """
 
+        from scipy.integrate import quad
         dimension = 1
         upper_bound = self.psi_real(np.array([[0]]))[0]
-        density_integral = 1 # TODO
+        density_integral = quad(lambda t: scipy.stats.norm.pdf(t, loc=0, scale=1), 0, 1)[0]
 
         sampler = DigitalNetB2(dimension=dimension + 1, seed=7)
         automatic = self.AcceptanceRejection(
