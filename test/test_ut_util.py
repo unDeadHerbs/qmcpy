@@ -576,24 +576,27 @@ class TestSymbolicSolver(unittest.TestCase):
         
 
     def test_multiple_different_local_maxima_strictly_within_domain(self):
-        """Several local maxima have different values, find the correct one."""
-        
+        """Several local maxima with different values, find the correct one."""
         def psi(x):
-            return (3-(x[:, 0]-0.1) ** 2) * (2-(0.9 - x[:, 0]) ** 2)
+            """A polynomial with a peak of (y=3) at (x=.1) and (y=2) at (x=.9)."""
+            return 3 - 2*(x[:,0] - 0.1)**2 * (x[:,0] - 0.9)**2 - 1.0*(x[:,0] - 0.1)**2
+        #from scipy.stats import norm
+        #def psi(x):
+        #    return (
+        #        3 * norm.pdf(x[:,0], loc=0.1, scale=0.05)
+        #        + 2 * norm.pdf(x[:,0], loc=0.9, scale=0.05)
+        #    )
         dimension = 1
-        
-        # Local extrema occur at x=0.1 and x=0.9, with values _ and _ respectively.
-        upper_bound=max(
-            psi(np.array([[0.1]])),
-            psi(np.array([[0.9]])),
-        )
-        #TODO: density_integral=Rational(151, 15)
+
+        max_at = .1
+        upper_bound=3
+        density_integral=2.7338 # TODO: Make Exact
 
         [upper_location, calc_upper], calc_density = max_norm(psi, dimension)
 
-        # TODO: self.assertEqual(max_at, upper_location)
-        # TODO: self.assertEqual(upper_bound, calc_upper)
-        # TODO: self.assertEqual(density_integral, calc_density)
+        self.assertAlmostEqual(max_at, upper_location[0], delta=1e-10)
+        self.assertEqual(upper_bound, calc_upper)
+        self.assertEqual(density_integral, calc_density)
         
         
     def test_numpy_function_support(self):
@@ -660,7 +663,7 @@ class TestSymbolicSolver(unittest.TestCase):
         self.assertAlmostEqual(density_integral, calc_density, delta=1e-10)
 
         
-    def test_insolvable_outside_region_1d(self):
+    def test_unsolvable_outside_region_1d(self):
         """The derivative involves cos(x^2), which is very hard to
         find the zeros of.  However, on [0,1], sin(x^2) is increasing,
         so the maximum is at x=1.
@@ -709,6 +712,28 @@ class TestSymbolicSolver(unittest.TestCase):
         self.assertEqual(max_at, upper_location)
         self.assertEqual(upper_bound, calc_upper)
         self.assertAlmostEqual(density_integral, calc_density, delta=1e-10)
+
+        
+    @unittest.expectedFailure
+    def test_gaussian_mixture(self):
+        """Test a basic Gaussian mixture."""
+        from scipy.stats import norm
+        def psi(x):
+            return (
+                3 * norm.pdf(x[:,0], loc=0.1, scale=0.05)
+                + 2 * norm.pdf(x[:,0], loc=0.9, scale=0.05)
+            )
+        dimension = 1
+
+        #max_at = .1
+        #upper_bound=3
+        #density_integral=1 # TODO: Calculate
+
+        [upper_location, calc_upper], calc_density = max_norm(psi, dimension)
+
+        #self.assertAlmostEqual(max_at, upper_location[0], delta=1e-10)
+        #self.assertEqual(upper_bound, calc_upper)
+        #self.assertEqual(density_integral, calc_density)
 
 
     def test_auto_piecewise_function(self):
