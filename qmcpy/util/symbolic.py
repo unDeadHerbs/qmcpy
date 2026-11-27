@@ -77,16 +77,10 @@ class SymbolicProxy:
             return NotImplemented
 
         # In this workflow, isnan is only used by SciPy for error checking.
-        # Treat symbolic values as not-NaN and return a false (zero) mask,
-        # preserving the proxy's array shape.
+        # Symbolic values are treated as not-NaN; return a concrete NumPy
+        # boolean mask with the proxy's recorded shape.
         if ufunc.__name__ == "isnan":
-            if isinstance(self.expression, sp.NDimArray):
-                result = self._array_apply(
-                    self.expression, lambda _value: sp.Integer(0)
-                )
-            else:
-                result = sp.Integer(0)
-            return SymbolicProxy(result, shape=self.shape)
+            return np.zeros(self.shape, dtype=np.bool_)
 
         # NumPy's bitwise/logical ufuncs are used by callers such as
         # scipy.stats to combine support-condition masks. Route them through
