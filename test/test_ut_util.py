@@ -595,21 +595,6 @@ class TestSymbolicSolver(unittest.TestCase):
         # TODO: self.assertEqual(upper_bound, calc_upper)
         # TODO: self.assertEqual(density_integral, calc_density)
         
-
-    def test_scipy_stats_support(self):
-        """Use a function from scipy stats."""
-        from scipy.integrate import quad
-        from scipy.stats import norm
-        def psi(x):
-            return norm.pdf(x[:, 0], loc=0, scale=1)
-        dimension=1
-        max_at = (0,)
-        upper_bound=sp.sqrt(1/(2*sp.pi))
-        density_integral=sp.erf(sp.sqrt(2)/2)/2
-        [upper_location, calc_upper], calc_density = max_norm(psi, dimension)
-        self.assertEqual(max_at, upper_location)
-        self.assertEqual(upper_bound, calc_upper)
-        self.assertEqual(density_integral, calc_density)
         
     def test_numpy_function_support(self):
         """Verify that the numpy functions are handled correctly."""
@@ -634,6 +619,30 @@ class TestSymbolicSolver(unittest.TestCase):
                 self.assertAlmostEqual(upper_bound, calc_upper, delta=1e-10)
                 self.assertAlmostEqual(density_integral, calc_density, delta=1e-10)
 
+
+    def test_scipy_function_support(self):
+        """Verify that the scipy functions are handled correctly."""
+        from scipy.stats import norm
+        from scipy.integrate import quad
+        
+        functions = {
+            'pdf': norm.pdf,
+            'cdf': norm.cdf,
+        }
+        for func_name in functions:
+            with self.subTest(f"Verify scipy.stats.norm.{func_name=} is supported"):
+                func=functions[func_name]
+                def psi(x):
+                    return func(x[:, 0])
+                dimension=1
+                max_at = 1 if func(1)>func(0) else 0
+                max_at = (max_at,)
+                upper_bound=func(max_at[0])
+                density_integral=quad(lambda t: func(t), 0, 1)[0]
+                [upper_location, calc_upper], calc_density = max_norm(psi, dimension)
+                self.assertEqual(max_at, upper_location)
+                self.assertAlmostEqual(upper_bound, calc_upper, delta=1e-10)
+                self.assertAlmostEqual(density_integral, calc_density, delta=1e-10)
         
     def test_numpy_abs_function_support(self):
         """Verify that the numpy abs function is handled correctly."""

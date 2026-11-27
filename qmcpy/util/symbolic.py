@@ -70,6 +70,7 @@ class SymbolicProxy:
         "divide": lambda x, y: x / y,
         "maximum": sp.Max,
         "minimum": sp.Min,
+        "ndtr": lambda x: (1 + sp.erf(x / sp.sqrt(2))) / 2,
     }
 
     def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
@@ -147,12 +148,172 @@ class SymbolicProxy:
                     axis = args[1] if len(args) > 1 else kwargs["axis"]
                     return value.shape[axis]
                 return value.size
+        if func is np.any:
+            # SciPy uses np.any(cond) to decide whether to evaluate a
+            # distribution's implementation. Reduce symbolic indicator
+            # expressions when their truth value is determined by SymPy.
+            value = args[0]
+            if isinstance(value, SymbolicProxy):
+                expression = value.expression
+                if isinstance(expression, sp.NDimArray):
+                    entries = [
+                        expression[index]
+                        for index in itertools.product(
+                            *(range(length) for length in expression.shape)
+                        )
+                    ]
+                else:
+                    entries = [expression]
+                conditions = []
+                for entry in entries:
+                    if entry in (sp.S.true, sp.S.false):
+                        conditions.append(entry)
+                    elif entry in (sp.S.Zero, sp.S.One):
+                        conditions.append(sp.Ne(entry, 0))
+                    else:
+                        conditions.append(sp.Ne(entry, 0))
+                result = sp.simplify(sp.Or(*conditions))
+                if result is sp.S.true:
+                    return True
+                if result is sp.S.false:
+                    return False
+                raise NotYetImplemented(
+                    "Cannot determine np.any() for an undecidable symbolic mask."
+                )
+        if func is np.all:
+            # scipy.stats uses np.all(cond) to determine whether every
+            # support-condition entry is true. Reduce the symbolic mask to a
+            # native boolean when SymPy can determine the result.
+            value = args[0]
+            if isinstance(value, SymbolicProxy):
+                if kwargs.get("axis", None) is not None or len(args) > 1:
+                    raise NotYetImplemented(
+                        "np.all() with an axis is not implemented for SymbolicProxy."
+                    )
+                expression = value.expression
+                if isinstance(expression, sp.NDimArray):
+                    entries = [
+                        expression[index]
+                        for index in itertools.product(
+                            *(range(length) for length in expression.shape)
+                        )
+                    ]
+                else:
+                    entries = [expression]
+                conditions = [
+                    entry if entry in (sp.S.true, sp.S.false)
+                    else sp.Ne(entry, 0)
+                    for entry in entries
+                ]
+                result = sp.simplify(sp.And(*conditions))
+                if result is sp.S.true:
+                    return True
+                if result is sp.S.false:
+                    return False
+                raise NotYetImplemented(
+                    "Cannot determine np.all() for an undecidable symbolic mask."
+                )
+        if func is np.place:
+            # scipy.stats uses np.place to fill the out-of-support portions
+            # of its result. Resolve symbolic masks when they are definite;
+            # an unresolved symbolic mask cannot safely index a concrete
+            # NumPy output array.
+            array, mask, values = args
+            if isinstance(mask, SymbolicProxy):
+                expression = mask.expression
+                if isinstance(expression, sp.NDimArray):
+                    entries = [expression[index] for index in itertools.product(
+                        *(range(length) for length in expression.shape)
+                    )]
+                else:
+                    entries = [expression]
+                concrete_mask = []
+                for entry in entries:
+                    simplified = sp.simplify(entry)
+                    if simplified in (sp.S.true, sp.S.One):
+                        concrete_mask.append(True)
+                    elif simplified in (sp.S.false, sp.S.Zero):
+                        concrete_mask.append(False)
+                    else:
+                        raise NotYetImplemented(
+                            "A symbolic mask with undecidable entries cannot "
+                            "be used to update a concrete NumPy array."
+                        )
+                if isinstance(values, SymbolicProxy):
+                    values = values.expression
+                    
+                    if isinstance(values, sp.NDimArray):
+                        values = np.array(values.tolist(), dtype=object)
+                    else:
+                        values = np.asarray(values, dtype=object)
+
+                np.place(array, np.asarray(concrete_mask, dtype=np.bool_).reshape(mask.shape), values)
+                return None
+        
+        if func is np.broadcast_arrays:
+            arrays = args
+            shapes = [
+                value.shape if isinstance(value, SymbolicProxy)
+                else np.shape(value)
+                for value in arrays
+            ]
+            broadcast_shape = np.broadcast_shapes(*shapes)
+            results = []
+
+            for value, shape in zip(arrays, shapes):
+                if isinstance(value, SymbolicProxy):
+                    expression = value.expression
+
+                    if isinstance(expression, sp.NDimArray):
+                        ndim_diff = len(broadcast_shape) - len(shape)
+                        indices = itertools.product(
+                            *(range(length) for length in broadcast_shape)
+                        )
+                        values = []
+                        for index in indices:
+                            source_index = tuple(
+                                0 if length == 1 else index[ndim_diff + axis]
+                                for axis, length in enumerate(shape)
+                            )
+                            values.append(expression[source_index])
+
+                        expression = sp.ImmutableDenseNDimArray(
+                            values, broadcast_shape
+                        )
+
+                    results.append(
+                        SymbolicProxy(expression, shape=broadcast_shape)
+                    )
+                else:
+                    results.append(
+                        np.broadcast_to(value, broadcast_shape)
+                    )
+
+            return results
+        if func is np.atleast_1d:
+            values = tuple(
+                value if isinstance(value, SymbolicProxy)
+                else np.atleast_1d(value)
+                for value in args
+            )
+            return values[0] if len(values) == 1 else list(values)
         if func is np.sum:
             values = args[0]
             if isinstance(values, SymbolicProxy):
                 return values
             return SymbolicProxy(sp.Add(*(sp.sympify(v) for v in values)))
         return NotImplemented
+
+    def ravel(self, order="C"):
+        """Return a flattened symbolic proxy."""
+        if isinstance(self.expression, sp.NDimArray):
+            expression = sp.ImmutableDenseNDimArray(
+                list(self.expression), (self.size,)
+            )
+        else:
+            expression = self.expression
+
+        return SymbolicProxy(expression, shape=(self.size,))
 
     @staticmethod
     def _array_apply(array, function):
@@ -394,13 +555,6 @@ def monkeypatch_for_symbolic():
         return original_asarray(value, dtype=dtype, copy=copy)
 
     mapping = {
-        norm.pdf: (
-            norm,
-            lambda x, loc=0, scale=1: sp.exp(-(((x - loc) / scale) ** 2) / 2)
-            / (scale * sp.sqrt(2 * sp.pi)),
-
-        ),
-        # TODO: More functions from norm
         np.asarray: (
             np,
             asarray_to_symbolic,
