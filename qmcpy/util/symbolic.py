@@ -19,8 +19,21 @@ class SymbolicProxy:
 
     __array_priority__ = 1000
 
-    def __init__(self, expression):
+    def __init__(self, expression, shape=None):
         self.expression = sp.sympify(expression)
+        # A proxy represents a symbolic value carried through NumPy's
+        # array-oriented APIs. Infer the shape when the expression itself is
+        # a SymPy N-dimensional array; scalar expressions represent one item.
+        if shape is None:
+            shape = (
+                self.expression.shape
+                if isinstance(self.expression, sp.NDimArray)
+                else (1,)
+            )
+        self.shape = tuple(shape)
+        self.ndim = len(self.shape)
+        self.size = int(np.prod(self.shape)) if self.shape else 1
+        self.dtype = np.dtype(float)
 
     def _sympy_(self):
         return self.expression
@@ -62,6 +75,31 @@ class SymbolicProxy:
     def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
         if method != "__call__" or kwargs.get("out") is not None:
             return NotImplemented
+
+        # In this workflow, isnan is only used by SciPy for error checking.
+        # Treat symbolic values as not-NaN and return a false (zero) mask,
+        # preserving the proxy's array shape.
+        if ufunc.__name__ == "isnan":
+            if isinstance(self.expression, sp.NDimArray):
+                result = self._array_apply(
+                    self.expression, lambda _value: sp.Integer(0)
+                )
+            else:
+                result = sp.Integer(0)
+            return SymbolicProxy(result, shape=self.shape)
+
+        # NumPy's bitwise/logical ufuncs are used by callers such as
+        # scipy.stats to combine support-condition masks. Route them through
+        # the same elementwise symbolic Boolean handling as Python's & and |.
+        if ufunc.__name__ in ("bitwise_and", "logical_and"):
+            other = next(value for value in inputs if value is not self)
+            return self._logical(other, sp.And)
+        if ufunc.__name__ in ("bitwise_or", "logical_or"):
+            other = next(value for value in inputs if value is not self)
+            return self._logical(other, sp.Or)
+        if ufunc.__name__ in ("invert", "logical_not"):
+            return self.__invert__()
+
         function = self._UFUNC_MAP.get(ufunc.__name__)
         if function is None:
             return NotImplemented
@@ -69,11 +107,52 @@ class SymbolicProxy:
             value.expression if isinstance(value, SymbolicProxy) else sp.sympify(value)
             for value in inputs
         ]
-        result = function(*args)
-        return SymbolicProxy(result)
+        # Apply ufuncs elementwise whenever any operand is a SymPy array.
+        # NumPy may dispatch a binary ufunc with a scalar on the left and an
+        # NDimArray on the right (for example, np.add(0, proxy.expression));
+        # passing that combination directly to a scalar SymPy function fails.
+        array_args = [arg for arg in args if isinstance(arg, sp.NDimArray)]
+        if array_args:
+            shape = array_args[0].shape
+            if any(array.shape != shape for array in array_args[1:]):
+                raise ValueError(
+                    "Symbolic array operands must have matching shapes; "
+                    f"got {[array.shape for array in array_args]}."
+                )
+            indices = itertools.product(*(range(length) for length in shape))
+            values = []
+            for index in indices:
+                element_args = [
+                    arg[index] if isinstance(arg, sp.NDimArray) else arg
+                    for arg in args
+                ]
+                values.append(function(*element_args))
+            result = sp.ImmutableDenseNDimArray(values, shape)
+        else:
+            result = function(*args)
+            shape = self.shape
+        return SymbolicProxy(result, shape=shape)
 
     def __array_function__(self, func, types, args, kwargs):
         # Handle the common NumPy function forms that are not ufuncs.
+        # scipy.stats uses np.shape(condition) to allocate its output array;
+        # returning the proxy's recorded shape avoids coercing a symbolic
+        # condition into a concrete NumPy array.
+        if func is np.shape:
+            value = args[0]
+            if isinstance(value, SymbolicProxy):
+                return value.shape
+        if func is np.ndim:
+            value = args[0]
+            if isinstance(value, SymbolicProxy):
+                return value.ndim
+        if func is np.size:
+            value = args[0]
+            if isinstance(value, SymbolicProxy):
+                if len(args) > 1 or "axis" in kwargs:
+                    axis = args[1] if len(args) > 1 else kwargs["axis"]
+                    return value.shape[axis]
+                return value.size
         if func is np.sum:
             values = args[0]
             if isinstance(values, SymbolicProxy):
@@ -81,15 +160,143 @@ class SymbolicProxy:
             return SymbolicProxy(sp.Add(*(sp.sympify(v) for v in values)))
         return NotImplemented
 
+    @staticmethod
+    def _array_apply(array, function):
+        """Apply a scalar operation to every entry of a SymPy array.
+
+        Build the dense array from a concrete list rather than NDimArray.applyfunc:
+        some SymPy versions pass a one-shot ``map`` to the array constructor,
+        which is incompatible with Python versions whose constructor requires
+        a sized sequence.
+        """
+        indices = itertools.product(
+            *(range(length) for length in array.shape)
+        )
+        values = [function(array[index]) for index in indices]
+        return sp.ImmutableDenseNDimArray(values, array.shape)
+
     def _binary(self, other, op):
-        if isinstance(other, SymbolicProxy):
-            return SymbolicProxy(op(self.expression, other._sympy_()))
-        return SymbolicProxy(op(self.expression, sp.sympify(other)))
+        other_expression = (
+            other.expression if isinstance(other, SymbolicProxy)
+            else sp.sympify(other)
+        )
+        left_is_array = isinstance(self.expression, sp.NDimArray)
+        right_is_array = isinstance(other_expression, sp.NDimArray)
+
+        if left_is_array and right_is_array:
+            if self.expression.shape != other_expression.shape:
+                raise ValueError(
+                    "Symbolic array operands must have matching shapes; "
+                    f"got {self.expression.shape} and {other_expression.shape}."
+                )
+            result = sp.ImmutableDenseNDimArray(
+                [
+                    op(self.expression[index], other_expression[index])
+                    for index in itertools.product(
+                        *(range(length) for length in self.expression.shape)
+                    )
+                ],
+                self.expression.shape,
+            )
+            shape = self.expression.shape
+        elif left_is_array:
+            # Broadcast a scalar right operand across every array element.
+            result = self._array_apply(
+                self.expression, lambda value: op(value, other_expression)
+            )
+            shape = self.expression.shape
+        elif right_is_array:
+            # Reverse operations (notably scalar / array) must broadcast the
+            # scalar over each element while preserving operand order.
+            result = self._array_apply(
+                other_expression, lambda value: op(self.expression, value)
+            )
+            shape = other_expression.shape
+        else:
+            result = op(self.expression, other_expression)
+            shape = self.shape
+        return SymbolicProxy(result, shape=shape)
 
     def _condition(self, other, cond):
-        return SymbolicProxy(
-            sp.Piecewise((1, cond(self.expression, sp.sympify(other))), (0, True))
+        other_expression = (
+            other.expression if isinstance(other, SymbolicProxy)
+            else sp.sympify(other)
         )
+        left_is_array = isinstance(self.expression, sp.NDimArray)
+        right_is_array = isinstance(other_expression, sp.NDimArray)
+
+        def indicator(left, right):
+            return sp.Piecewise((1, cond(left, right)), (0, True))
+
+        if left_is_array and right_is_array:
+            if self.expression.shape != other_expression.shape:
+                raise ValueError(
+                    "Symbolic array operands must have matching shapes; "
+                    f"got {self.expression.shape} and {other_expression.shape}."
+                )
+            result = sp.ImmutableDenseNDimArray(
+                [
+                    indicator(self.expression[index], other_expression[index])
+                    for index in itertools.product(
+                        *(range(length) for length in self.expression.shape)
+                    )
+                ],
+                self.expression.shape,
+            )
+            shape = self.expression.shape
+        elif left_is_array:
+            result = self._array_apply(
+                self.expression, lambda value: indicator(value, other_expression)
+            )
+            shape = self.expression.shape
+        elif right_is_array:
+            result = self._array_apply(
+                other_expression, lambda value: indicator(self.expression, value)
+            )
+            shape = other_expression.shape
+        else:
+            result = indicator(self.expression, other_expression)
+            shape = self.shape
+        return SymbolicProxy(result, shape=shape)
+
+    def _logical(self, other, operator):
+        """Combine symbolic Boolean/indicator expressions elementwise."""
+        def as_boolean(value):
+            # Comparisons are represented as 0/1 Piecewise expressions.
+            # Convert them back to SymPy Boolean expressions for And/Or.
+            if value in (sp.true, sp.false):
+                return value
+            return sp.Ne(value, 0)
+
+        return self._condition(
+            other,
+            lambda left, right: operator(as_boolean(left), as_boolean(right)),
+        )
+
+    def __and__(self, other):
+        return self._logical(other, sp.And)
+
+    def __rand__(self, other):
+        return self._logical(other, lambda left, right: sp.And(right, left))
+
+    def __or__(self, other):
+        return self._logical(other, sp.Or)
+
+    def __ror__(self, other):
+        return self._logical(other, lambda left, right: sp.Or(right, left))
+
+    def __invert__(self):
+        def negate(value):
+            return sp.Piecewise(
+                (1, sp.Not(sp.Ne(value, 0))),
+                (0, True),
+            )
+
+        if isinstance(self.expression, sp.NDimArray):
+            result = self._array_apply(self.expression, negate)
+        else:
+            result = negate(self.expression)
+        return SymbolicProxy(result, shape=self.shape)
 
     def __add__(self, other):
         return self._binary(other, lambda a, b: a + b)
@@ -122,13 +329,13 @@ class SymbolicProxy:
         return self._binary(other, lambda a, b: b**a)
 
     def __neg__(self):
-        return -self.expression
+        return SymbolicProxy(-self.expression, shape=self.shape)
 
     def __pos__(self):
-        return self.expression
+        return SymbolicProxy(self.expression, shape=self.shape)
 
     def __abs__(self):
-        return sp.Abs(self.expression)
+        return SymbolicProxy(sp.Abs(self.expression), shape=self.shape)
 
     def __lt__(self, other):
         return self._condition(other, sp.Lt)
@@ -169,27 +376,41 @@ class SymbolicInput:
         if isinstance(key, tuple):
             _, col = key
             if isinstance(col, int):
-                return SymbolicProxy(self.symbols[col])
+                return SymbolicProxy(self.symbols[col], shape=(1,))
         elif isinstance(key, int):
             # TODO: Do I need this mode, or is that invalid for the
             # rest of qmcpy?
-            return SymbolicProxy(self.symbols[key])
+            return SymbolicProxy(self.symbols[key], shape=(1,))
         raise NotImplementedError(f"Unsupported indexing: {key}")
 
 
 @contextmanager
-def scipy_to_sympy():
-    """Monkeypatch out scipy functions temporarily."""
-    # TODO: There has to be a better and safer to do this.  I
-    # particularly don't like that I'm reimplementing complex
-    # functions.
+def monkeypatch_for_symbolic():
+    """Monkeypatch out functions that don't work well with the symbolic conversion."""
+
+    original_asarray = np.asarray
+    def asarray_to_symbolic(value, dtype=None, copy=None):
+        # scipy.stats calls np.asarray on its input before evaluating the
+        # distribution. Preserve symbolic proxies instead of coercing them
+        # into object arrays; retain NumPy's normal behavior for other inputs.
+        if isinstance(value, SymbolicProxy):
+            return value
+        if copy is None:
+            return original_asarray(value, dtype=dtype)
+        return original_asarray(value, dtype=dtype, copy=copy)
+
     mapping = {
         norm.pdf: (
             norm,
             lambda x, loc=0, scale=1: sp.exp(-(((x - loc) / scale) ** 2) / 2)
             / (scale * sp.sqrt(2 * sp.pi)),
-        )
+
+        ),
         # TODO: More functions from norm
+        np.asarray: (
+            np,
+            asarray_to_symbolic,
+        ),
     }
     original = {}
     try:
@@ -206,7 +427,7 @@ def scipy_to_sympy():
 def to_symbolic(psi_function, dimensions):
     """Convert a python function (np[data,dimensions] -> number) to a sympy expression."""
     x = SymbolicInput(dimensions)
-    with scipy_to_sympy():
+    with monkeypatch_for_symbolic():
         psi = psi_function(x)
     if isinstance(psi, SymbolicProxy):
         psi = psi._sympy_()
